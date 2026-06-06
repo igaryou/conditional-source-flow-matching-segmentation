@@ -20,7 +20,7 @@ PyTorchによる，画像条件付きsource分布を用いたFlow Matchingベー
 
 本実装では，セマンティックセグメンテーションをカテゴリラベルの直接予測ではなく，カテゴリ確率表現の生成問題として扱います．処理の流れは以下の通りです．
 
-まず，one-hot表現のセマンティックマスク $y$ を，Dirichlet noiseによってopen simplex上の確率表現 $x_1$ に変換します．
+まず，one-hot表現のセマンティックマスク `y` を，Dirichlet noiseによってopen simplex上の確率表現 `x₁` に変換します．
 
 ```math
 x_1 = \lambda y + (1 - \lambda)\epsilon,
@@ -28,17 +28,21 @@ x_1 = \lambda y + (1 - \lambda)\epsilon,
 \epsilon \sim \mathrm{Dirichlet}(\alpha_1 \mathbf{1})
 ```
 
-ここで，$\lambda$ はone-hotマスクとDirichlet noiseの混合比を表します．この処理により，カテゴリラベルを厳密なone-hot表現ではなく，すべての成分が正の確率ベクトルとして扱います．
+ここで，`λ` はone-hotマスクとDirichlet noiseの混合比を表します．この処理により，カテゴリラベルを厳密なone-hot表現ではなく，すべての成分が正の確率ベクトルとして扱います．
 
-次に，$x_1$ を対数空間に写し，ヘルマート行列に基づく直交コントラスト行列 $H \in \mathbb{R}^{(K-1)\times K}$ を用いて，Euclidean空間の表現 $z_1$ に変換します．
+次に，`x₁` を対数空間に写し，ヘルマート行列に基づく直交コントラスト行列 `H` を用いて，Euclidean空間の表現 `z₁` に変換します．
+
+```math
+H \in \mathbb{R}^{(K-1)\times K}
+```
 
 ```math
 z_1 = H \log x_1
 ```
 
-ここで，$K$ はクラス数であり，$H$ は各行が互いに直交し，かつ全要素和が0となるコントラスト基底を与える行列です．本実装では，`scipy.linalg.helmert(K, full=False)` により作成されるHelmert contrast matrixを用います．この変換により，simplex上のカテゴリ確率を $K-1$ 次元の連続表現として扱うことができます．
+ここで，`K` はクラス数であり，`H` は各行が互いに直交し，かつ全要素和が0となるコントラスト基底を与える行列です．本実装では，`scipy.linalg.helmert(K, full=False)` により作成されるHelmert contrast matrixを用います．この変換により，simplex上のカテゴリ確率を `K-1` 次元の連続表現として扱うことができます．
 
-source generatorは，入力画像 $I$ からsource分布の平均 $\mu_\theta(I)$ を予測します．固定分散を用いる場合，source sample $z_0$ は以下で表されます．
+source generatorは，入力画像 `I` からsource分布の平均 `μθ(I)` を予測します．固定分散を用いる場合，source sample `z₀` は以下で表されます．
 
 ```math
 z_0 = \mu_\theta(I) + \sigma \epsilon,
@@ -46,9 +50,9 @@ z_0 = \mu_\theta(I) + \sigma \epsilon,
 \epsilon \sim \mathcal{N}(0, I)
 ```
 
-ここで，$\sigma$ はsource分布の標準偏差です．分散を学習する設定では，source generatorは平均に加えて対数分散も出力します．
+ここで，`σ` はsource分布の標準偏差です．分散を学習する設定では，source generatorは平均に加えて対数分散も出力します．
 
-Flow Matchingでは，source表現 $z_0$ からtarget表現 $z_1$ への経路上の点 $z_t$ を用います．一般には，時刻変換 $\tau(t)$ を用いて以下のように表します．
+Flow Matchingでは，source表現 `z₀` からtarget表現 `z₁` への経路上の点 `zₜ` を用います．一般には，時刻変換 `τ(t)` を用いて以下のように表します．
 
 ```math
 z_t = (1 - \tau(t))z_0 + \tau(t)z_1
@@ -60,7 +64,7 @@ z_t = (1 - \tau(t))z_0 + \tau(t)z_1
 u_t = \dot{\tau}(t)(z_1 - z_0)
 ```
 
-本実験の標準設定では，$\tau(t)=t$ の線形経路を用います．この場合，経路と教師速度場は以下のようになります．
+本実験の標準設定では，`τ(t)=t` の線形経路を用います．この場合，経路と教師速度場は以下のようになります．
 
 ```math
 z_t = (1 - t)z_0 + tz_1
@@ -70,7 +74,7 @@ z_t = (1 - t)z_0 + tz_1
 u_t = z_1 - z_0
 ```
 
-モデル $v_\theta$ は，入力画像 $I$，時刻 $t$，中間表現 $z_t$ を条件として速度場を予測します．Flow Matchingの速度場損失は以下で表されます．
+モデル `vθ` は，入力画像 `I`，時刻 `t`，中間表現 `zₜ` を条件として速度場を予測します．Flow Matchingの速度場損失は以下で表されます．
 
 ```math
 \mathcal{L}_{\mathrm{FM}}
@@ -85,7 +89,7 @@ v_\theta(z_t, I, t)
 \right]
 ```
 
-さらに，source generatorが予測する平均 $\mu_\theta(I)$ が，ターゲット表現 $z_1$ と近い方向を向くように，正規化後のMSEを補助損失として用います．
+さらに，source generatorが予測する平均 `μθ(I)` が，ターゲット表現 `z₁` と近い方向を向くように，正規化後のMSEを補助損失として用います．
 
 ```math
 \mathcal{L}_{\mathrm{align}}
@@ -132,15 +136,41 @@ v_\theta(z_t, I, t)
 \lambda_{\mathrm{align}}\mathcal{L}_{\mathrm{align}}
 ```
 
-推論時には，source generatorから得られる $z_0$ を初期状態とし，学習済み速度場 $v_\theta$ をEuler法，midpoint法，またはRK4法で積分します．最終的に得られた連続表現をカテゴリ確率へ戻し，argmaxによってセマンティックセグメンテーションマスクを得ます．
+推論時には，source generatorから得られる `z₀` を初期状態とし，学習済み速度場 `vθ` をEuler法，midpoint法，またはRK4法で積分します．最終的に得られた連続表現をカテゴリ確率へ戻し，argmaxによってセマンティックセグメンテーションマスクを得ます．
 
 ## 生成例
 
 以下は，source分布から出発し，学習済み速度場を積分してセグメンテーションマスクを生成する過程の例です．
 
-| Example 0                                          | Example 1                                          | Example 2                                          |
-| -------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------- |
-| ![qualitative example 0](assets/qualitative/0.png) | ![qualitative example 1](assets/qualitative/1.png) | ![qualitative example 2](assets/qualitative/2.png) |
+### Example 0
+
+<p align="center">
+  <img src="assets/qualitative/0.png" width="900">
+</p>
+
+### Example 1
+
+<p align="center">
+  <img src="assets/qualitative/1.png" width="900">
+</p>
+
+### Example 2
+
+<p align="center">
+  <img src="assets/qualitative/2.png" width="900">
+</p>
+
+### Example 3
+
+<p align="center">
+  <img src="assets/qualitative/3.png" width="900">
+</p>
+
+### Example 4
+
+<p align="center">
+  <img src="assets/qualitative/4.png" width="900">
+</p>
 
 ## リポジトリ構成
 
@@ -150,7 +180,9 @@ v_\theta(z_t, I, t)
 │   └── qualitative/
 │       ├── 0.png
 │       ├── 1.png
-│       └── 2.png
+│       ├── 2.png
+│       ├── 3.png
+│       └── 4.png
 ├── configs/
 │   └── cityscapes_csfm_128x256.json
 ├── scripts/
