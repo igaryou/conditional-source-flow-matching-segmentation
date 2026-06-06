@@ -6,7 +6,7 @@ PyTorchによる，画像条件付きsource分布を用いたFlow Matchingベー
 
 本リポジトリは，セマンティックセグメンテーションを生成問題として扱い，Flow Matchingによってセグメンテーションマスクを生成するための研究実装です．
 
-カテゴリラベルとして表されるセグメンテーションマスクを，open simplex上のカテゴリ確率表現に変換し，さらにILR変換によってEuclidean空間へ写像します．その空間上で，入力画像に条件付けられたsource generatorにより初期分布をモデル化し，Flow Matchingの速度場を学習します．
+カテゴリラベルとして表されるセグメンテーションマスクを，open simplex上のカテゴリ確率表現に変換し，ヘルマート行列に基づく直交コントラスト行列を用いてEuclidean空間へ写像します．その空間上で，入力画像に条件付けられたsource generatorにより初期分布をモデル化し，Flow Matchingの速度場を学習します．
 
 本リポジトリは，学習設定，モデル構築，checkpointの読み込み，評価処理を整理し，再現しやすい研究コードとして公開することを目的としています．
 
@@ -18,136 +18,139 @@ PyTorchによる，画像条件付きsource分布を用いたFlow Matchingベー
 
 ## 手法の概要
 
-## 手法の概要
+本実装では，セマンティックセグメンテーションをカテゴリラベルの直接予測ではなく，カテゴリ確率表現の生成問題として扱います．処理の流れは以下の通りです．
 
-本実装では，セマンティックセグメンテーションをカテゴリラベルの直接予測ではなく，カテゴリ確率表現の生成問題として扱う．処理の流れは以下の通りである．
+まず，one-hot表現のセマンティックマスク $y$ を，Dirichlet noiseによってopen simplex上の確率表現 $x_1$ に変換します．
 
-まず，one-hot表現のセマンティックマスク $y$ を，Dirichlet noiseによってopen simplex上の確率表現 $x_1$ に変換する．
-
-$$
+```math
 x_1 = \lambda y + (1 - \lambda)\epsilon,
 \quad
 \epsilon \sim \mathrm{Dirichlet}(\alpha_1 \mathbf{1})
-$$
+```
 
-ここで，$\lambda$ はone-hotマスクとDirichlet noiseの混合比を表す．この処理により，カテゴリラベルを厳密なone-hot表現ではなく，すべての成分が正の確率ベクトルとして扱う．
+ここで，$\lambda$ はone-hotマスクとDirichlet noiseの混合比を表します．この処理により，カテゴリラベルを厳密なone-hot表現ではなく，すべての成分が正の確率ベクトルとして扱います．
 
-次に，$x_1$ を対数空間に写し，ヘルマート行列に基づく直交コントラスト行列 $H \in \mathbb{R}^{(K-1)\times K}$ を用いて，Euclidean空間の表現 $z_1$ に変換する．
+次に，$x_1$ を対数空間に写し，ヘルマート行列に基づく直交コントラスト行列 $H \in \mathbb{R}^{(K-1)\times K}$ を用いて，Euclidean空間の表現 $z_1$ に変換します．
 
-$$
+```math
 z_1 = H \log x_1
-$$
+```
 
-ここで，$K$ はクラス数であり，$H$ は各行が互いに直交し，かつ全要素和が0となるコントラスト基底を与える行列である．本実装では，`scipy.linalg.helmert(K, full=False)` により作成されるHelmert contrast matrixを用いる．この変換により，simplex上のカテゴリ確率を $K-1$ 次元の連続表現として扱うことができる．
+ここで，$K$ はクラス数であり，$H$ は各行が互いに直交し，かつ全要素和が0となるコントラスト基底を与える行列です．本実装では，`scipy.linalg.helmert(K, full=False)` により作成されるHelmert contrast matrixを用います．この変換により，simplex上のカテゴリ確率を $K-1$ 次元の連続表現として扱うことができます．
 
-source generatorは，入力画像 $I$ からsource分布の平均 $\mu_\theta(I)$ を予測する．固定分散を用いる場合，source sample $z_0$ は以下で表される．
+source generatorは，入力画像 $I$ からsource分布の平均 $\mu_\theta(I)$ を予測します．固定分散を用いる場合，source sample $z_0$ は以下で表されます．
 
-$$
+```math
 z_0 = \mu_\theta(I) + \sigma \epsilon,
 \quad
 \epsilon \sim \mathcal{N}(0, I)
-$$
+```
 
-ここで，$\sigma$ はsource分布の標準偏差である．分散を学習する設定では，source generatorは平均に加えて対数分散も出力する．
+ここで，$\sigma$ はsource分布の標準偏差です．分散を学習する設定では，source generatorは平均に加えて対数分散も出力します．
 
-Flow Matchingでは，source表現 $z_0$ からtarget表現 $z_1$ への経路上の点 $z_t$ を用いる．一般には，時刻変換 $\tau(t)$ を用いて以下のように表す．
+Flow Matchingでは，source表現 $z_0$ からtarget表現 $z_1$ への経路上の点 $z_t$ を用います．一般には，時刻変換 $\tau(t)$ を用いて以下のように表します．
 
-$$
+```math
 z_t = (1 - \tau(t))z_0 + \tau(t)z_1
-$$
+```
 
-このとき，教師速度場は以下で与えられる．
+このとき，教師速度場は以下で与えられます．
 
-$$
+```math
 u_t = \dot{\tau}(t)(z_1 - z_0)
-$$
+```
 
-本実験の標準設定では，$\tau(t)=t$ の線形経路を用いる．この場合，経路と教師速度場は以下のようになる．
+本実験の標準設定では，$\tau(t)=t$ の線形経路を用います．この場合，経路と教師速度場は以下のようになります．
 
-$$
+```math
 z_t = (1 - t)z_0 + tz_1
-$$
+```
 
-$$
+```math
 u_t = z_1 - z_0
-$$
+```
 
-モデル $v_\theta$ は，入力画像 $I$，時刻 $t$，中間表現 $z_t$ を条件として速度場を予測する．Flow Matchingの速度場損失は以下で表される．
+モデル $v_\theta$ は，入力画像 $I$，時刻 $t$，中間表現 $z_t$ を条件として速度場を予測します．Flow Matchingの速度場損失は以下で表されます．
 
-$$
+```math
 \mathcal{L}_{\mathrm{FM}}
-=========================
-
-\mathbb{E}*{t, z_0, z_1}
+=
+\mathbb{E}_{t,z_0,z_1}
 \left[
-\left|
-v*\theta(z_t, I, t)
--------------------
-
+\left\|
+v_\theta(z_t, I, t)
+-
 \dot{\tau}(t)(z_1 - z_0)
-\right|_2^2
+\right\|_2^2
 \right]
-$$
+```
 
-さらに，source generatorが予測する平均 $\mu_\theta(I)$ が，ターゲット表現 $z_1$ と近い方向を向くように，正規化後のMSEを補助損失として用いる．
+さらに，source generatorが予測する平均 $\mu_\theta(I)$ が，ターゲット表現 $z_1$ と近い方向を向くように，正規化後のMSEを補助損失として用います．
 
-$$
+```math
 \mathcal{L}_{\mathrm{align}}
-============================
-
+=
 \mathbb{E}
 \left[
-\left|
-\frac{\mu_\theta(I)}{|\mu_\theta(I)|_2}
----------------------------------------
-
-\frac{z_1}{|z_1|_2}
-\right|_2^2
+\left\|
+\frac{\mu_\theta(I)}{\|\mu_\theta(I)\|_2}
+-
+\frac{z_1}{\|z_1\|_2}
+\right\|_2^2
 \right]
-$$
+```
 
-ここで，正規化は各画素におけるチャネル方向に対して行う．この損失により，source分布の平均がターゲットマスク表現に近い方向へ配置されるように学習される．
+ここで，正規化は各画素におけるチャネル方向に対して行います．この損失により，source分布の平均がターゲットマスク表現に近い方向へ配置されるように学習されます．
 
-また，source分布の分散を学習する場合には，分散が過度に大きくならないように以下の正則化項を用いる．
+また，source分布の分散を学習する場合には，分散が過度に大きくならないように以下の正則化項を用います．
 
-$$
+```math
 \mathcal{L}_{\mathrm{var}}
-==========================
-
+=
 \frac{1}{2}
 \mathbb{E}
 \left[
 \exp(\log \sigma^2)
--------------------
-
-## \log \sigma^2
-
+-
+\log \sigma^2
+-
 1
 \right]
-$$
+```
 
-固定分散を用いる設定では，この分散正則化項は0として扱う．分散も学習対象とすると速度場の学習が不安定になるため固定分散での実装を基本としている．
+固定分散を用いる設定では，この分散正則化項は0として扱います．分散も学習対象とすると速度場の学習が不安定になる場合があるため，本実装では固定分散での実験を基本としています．
 
-最終的な学習損失は以下で表される．
+最終的な学習損失は以下で表されます．
 
-$$
+```math
 \mathcal{L}
-===========
-
-\mathcal{L}*{\mathrm{FM}}
+=
+\mathcal{L}_{\mathrm{FM}}
 +
-\lambda*{\mathrm{var}}\mathcal{L}*{\mathrm{var}}
+\lambda_{\mathrm{var}}\mathcal{L}_{\mathrm{var}}
 +
-\lambda*{\mathrm{align}}\mathcal{L}_{\mathrm{align}}
-$$
+\lambda_{\mathrm{align}}\mathcal{L}_{\mathrm{align}}
+```
 
-推論時には，source generatorから得られる $z_0$ を初期状態とし，学習済み速度場 $v_\theta$ をEuler法，midpoint法，またはRK4法で積分する．最終的に得られた連続表現をカテゴリ確率へ戻し，argmaxによってセマンティックセグメンテーションマスクを得る．
+推論時には，source generatorから得られる $z_0$ を初期状態とし，学習済み速度場 $v_\theta$ をEuler法，midpoint法，またはRK4法で積分します．最終的に得られた連続表現をカテゴリ確率へ戻し，argmaxによってセマンティックセグメンテーションマスクを得ます．
 
+## 生成例
+
+以下は，source分布から出発し，学習済み速度場を積分してセグメンテーションマスクを生成する過程の例です．
+
+| Example 0                                          | Example 1                                          | Example 2                                          |
+| -------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------- |
+| ![qualitative example 0](assets/qualitative/0.png) | ![qualitative example 1](assets/qualitative/1.png) | ![qualitative example 2](assets/qualitative/2.png) |
 
 ## リポジトリ構成
 
 ```text
 .
+├── assets/
+│   └── qualitative/
+│       ├── 0.png
+│       ├── 1.png
+│       └── 2.png
 ├── configs/
 │   └── cityscapes_csfm_128x256.json
 ├── scripts/
